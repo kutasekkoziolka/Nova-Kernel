@@ -8,20 +8,29 @@ set -o pipefail
 #  Devices: A73 (a73xq) | A52S (a52sxq) | M52 (m52xq)
 # ════════════════════════════════════════════════════════════════
 
-# ── Colors & Styles ──────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────
+#  § 1 — CONSTANTS & STYLES
+# ─────────────────────────────────────────────────────────────────
+
 BOLD="\e[1m";  RESET="\e[0m";  DIM="\e[2m"
 CYAN="\e[1;36m";  GREEN="\e[1;32m";  YELLOW="\e[1;33m"
-RED="\e[1;31m";   BLUE="\e[1;34m";   MAGENTA="\e[1;35m"
+RED="\e[1;31m"
 
 IN_GHA="${GITHUB_ACTIONS:-false}"
 
-# ── Logging helpers ──────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────
+#  § 2 — LOGGING
+# ─────────────────────────────────────────────────────────────────
+
+# Usage: log_group_start "emoji" "Label"
 log_group_start() {
     if [[ "$IN_GHA" == "true" ]]; then
-        echo "::group::  🔹 $1"
+        echo "::group::$1  $2"
     else
         echo -e "\n${CYAN}${BOLD}╔════════════════════════════════════════╗${RESET}"
-        echo -e "${CYAN}${BOLD}║  $1${RESET}"
+        echo -e "${CYAN}${BOLD}║  $1  $2${RESET}"
         echo -e "${CYAN}${BOLD}╚════════════════════════════════════════╝${RESET}"
     fi
 }
@@ -39,9 +48,13 @@ log_sep()       { echo -e "${DIM}  ───────────────
 elapsed()       { date -u -d @$(( $(date +%s) - $1 )) +'%-Mm %-Ss'; }
 ts()            { date '+%H:%M:%S'; }
 
-# ── Dependency check ─────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────
+#  § 3 — CORE UTILITIES
+# ─────────────────────────────────────────────────────────────────
+
 check_dependencies() {
-    log_group_start "Dependency Check"
+    log_group_start "🔍" "Dependency Check"
     local missing=false
     for tool in git curl wget jq unzip tar lz4 awk sed sha1sum md5sum zip; do
         if command -v "$tool" &>/dev/null; then
@@ -56,29 +69,90 @@ check_dependencies() {
     log_group_end
 }
 
-# ── Variables ────────────────────────────────────────────────────
 init_vars() {
-    USR_NAME="$(whoami)"
     SRC_DIR="$(pwd)"
     OUT_DIR="$SRC_DIR/out"
     TC_DIR="$HOME/toolchains"
     JOBS=$(nproc)
     CLANGVER="clang-r563880c"
     CLANG_PREBUILT_BIN="$TC_DIR/$CLANGVER/bin/"
-    export USR_NAME SRC_DIR OUT_DIR TC_DIR JOBS CLANGVER CLANG_PREBUILT_BIN
+    export SRC_DIR OUT_DIR TC_DIR JOBS CLANGVER CLANG_PREBUILT_BIN
     export PATH="$TC_DIR:$CLANG_PREBUILT_BIN:$PATH"
 }
 
-# ── Tool fetching ────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────
+#  § 4 — INTERACTIVE PROMPTS  (local builds only)
+# ─────────────────────────────────────────────────────────────────
+
+prompt_variant() {
+    echo -e "${CYAN}${BOLD}"
+    echo "  Select target device:"
+    echo "  [1] Galaxy A73 5G  (a73xq)"
+    echo "  [2] Galaxy A52s 5G (a52sxq)"
+    echo "  [3] Galaxy M52 5G  (m52xq)"
+    echo -e "${RESET}"
+    read -rp "  → Choice [1-3]: " choice
+    case "$choice" in
+        1) VARIANT="a73xq";;
+        2) VARIANT="a52sxq";;
+        3) VARIANT="m52xq";;
+        *) log_err "Invalid choice"; exit 1;;
+    esac
+}
+
+prompt_ksu() {
+    echo -e "${CYAN}${BOLD}"
+    echo "  Build with KernelSU support?"
+    echo "  [1] No  — standard GKI kernel"
+    echo "  [2] Yes — KernelSU kernel"
+    echo -e "${RESET}"
+    read -rp "  → Choice [1-2]: " choice
+    case "$choice" in
+        1) KERNELSU=false;;
+        2) KERNELSU=true;;
+        *) log_err "Invalid choice"; exit 1;;
+    esac
+}
+
+prompt_ksu_branch() {
+    echo -e "${CYAN}${BOLD}"
+    echo "  Select KernelSU branch:"
+    echo "  [1] legacy       (stable, recommended)"
+    echo "  [2] main         (latest stable)"
+    echo "  [3] next         (bleeding edge)"
+    echo "  [4] susfs-main   (SuSFS + main)"
+    echo "  [5] susfs-next   (SuSFS + next)"
+    echo "  [6] custom       (enter manually)"
+    echo -e "${RESET}"
+    read -rp "  → Choice [1-6]: " choice
+    case "$choice" in
+        1) KSU_BRANCH="legacy";;
+        2) KSU_BRANCH="main";;
+        3) KSU_BRANCH="next";;
+        4) KSU_BRANCH="susfs-main";;
+        5) KSU_BRANCH="susfs-next";;
+        6) read -rp "  → Branch name: " KSU_BRANCH
+           [[ -z "$KSU_BRANCH" ]] && { log_err "Branch name cannot be empty"; exit 1; };;
+        *) log_err "Invalid choice"; exit 1;;
+    esac
+}
+
+
+# ─────────────────────────────────────────────────────────────────
+#  § 5 — BUILD PHASES
+# ─────────────────────────────────────────────────────────────────
+
+# ── 5.1  Toolchain & assets ──────────────────────────────────────
 fetch_tools() {
-    log_group_start "Toolchain & Assets"
+    log_group_start "🧰" "Toolchain & Assets"
     mkdir -p "$TC_DIR"
 
     if [[ ! -d "$CLANG_PREBUILT_BIN" ]]; then
         log_step "Downloading Clang ($CLANGVER)..."
         mkdir -p "$TC_DIR/$CLANGVER"
-        local url="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/$CLANGVER.tar.gz"
-        wget -q --show-progress "$url" -P "$TC_DIR"
+        local url="https://github.com/OmarAlsmehan/Android-tools/releases/download/clang-r563880c-1/clang-r563880c.tar.gz"
+        wget --progress=bar:force:noscroll "$url" -P "$TC_DIR"
         tar xf "$TC_DIR/$CLANGVER.tar.gz" -C "$TC_DIR/$CLANGVER"
         rm "$TC_DIR/$CLANGVER.tar.gz"
         log_ok "Clang ready"
@@ -132,9 +206,28 @@ fetch_tools() {
     log_group_end
 }
 
-# ── Kernel compile ───────────────────────────────────────────────
+# ── 5.2  KernelSU setup ──────────────────────────────────────────
+setup_kernelsu() {
+    log_group_start "⚡" "KernelSU Setup"
+
+    log_step "Running tiann/KernelSU setup..."
+    curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+    rm -rf KernelSU
+
+    local KSU_REPO="${NK_KSU_REPO:-https://github.com/OmarAlsmehan/KernelSU-Next.git}"
+    local KSU_BRANCH_USE="${KSU_BRANCH:-legacy}"
+    log_step "Cloning KernelSU-Next (${KSU_BRANCH_USE})..."
+    log_info "Repo:   $KSU_REPO"
+    log_info "Branch: $KSU_BRANCH_USE"
+    git clone --depth=1 -b "$KSU_BRANCH_USE" "$KSU_REPO" KernelSU
+
+    log_ok "KernelSU-Next integrated"
+    log_group_end
+}
+
+# ── 5.3  Kernel compile ──────────────────────────────────────────
 build_kernel() {
-    log_group_start "Kernel Compile  [$(ts)]"
+    log_group_start "🔨" "Kernel Compile  [$(ts)]"
     case "$1" in
         a73xq)  VARIANT="a73xq";  DEVICE="A73";;
         a52sxq) VARIANT="a52sxq"; DEVICE="A52S";;
@@ -145,7 +238,8 @@ build_kernel() {
 
     export BRANCH="android11" KMI_GENERATION=2 LLVM=1 DEPMOD=depmod
     export KCFLAGS="${KCFLAGS} -D__ANDROID_COMMON_KERNEL__"
-    export STOP_SHIP_TRACEPRINTK=1 IN_KERNEL_MODULES=1 DO_NOT_STRIP_MODULES=1
+    export STOP_SHIP_TRACEPRINTK=1 IN_KERNEL_MODULES=1
+    export DO_NOT_STRIP_MODULES=0 INSTALL_MOD_STRIP=1
     export DEFCONF="nova_defconfig" FRAG="${VARIANT}.config"
     export ABI_DEFINITION=android/abi_gki_aarch64.xml
     export KMI_SYMBOL_LIST=android/abi_gki_aarch64
@@ -181,6 +275,9 @@ android/abi_gki_aarch64_zebra
     log_sep
     log_kv "Device:"    "$DEVICE ($VARIANT)"
     log_kv "Type:"      "$BUILD_TYPE"
+    if [[ "$BUILD_TYPE" == "KSU" ]]; then
+        log_kv "KSU Branch:" "${KSU_BRANCH:-legacy}"
+    fi
     log_kv "Version:"   "5.4.x$LOCALVERSION"
     log_kv "Toolchain:" "$(clang --version | head -n1)"
     log_kv "Jobs:"      "$JOBS"
@@ -201,9 +298,9 @@ android/abi_gki_aarch64_zebra
     log_group_end
 }
 
-# ── Modules ──────────────────────────────────────────────────────
+# ── 5.4  Modules ─────────────────────────────────────────────────
 build_modules() {
-    log_group_start "Modules  [$(ts)]"
+    log_group_start "📦" "Modules  [$(ts)]"
     local T0=$(date +%s)
 
     make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" \
@@ -230,9 +327,9 @@ build_modules() {
     log_group_end
 }
 
-# ── Artifact staging ─────────────────────────────────────────────
+# ── 5.5  Artifact staging ─────────────────────────────────────────
 stage_artifacts() {
-    log_group_start "Staging Artifacts"
+    log_group_start "🗂️" "Staging Artifacts"
     mkdir -p \
         "$TC_DIR/NovaKernel/$DEVICE/$BUILD_TYPE/modules" \
         "$TC_DIR/NovaKernel/$DEVICE/ZIP/META-INF/com/google/android" \
@@ -329,9 +426,9 @@ FLASH_EOF
     log_group_end
 }
 
-# ── GKI image repack ─────────────────────────────────────────────
+# ── 5.6  Image repack ─────────────────────────────────────────────
 gki_repack() {
-    log_group_start "Image Repack  [$(ts)]"
+    log_group_start "🖼️" "Image Repack  [$(ts)]"
     local T0=$(date +%s)
     local DEST="$TC_DIR/NovaKernel/$DEVICE/$BUILD_TYPE"
     mkdir -p "$DEST"
@@ -411,9 +508,9 @@ gki_repack() {
     log_group_end
 }
 
-# ── Package as ZIP ───────────────────────────────────────────────
+# ── 5.7  Package as ZIP ───────────────────────────────────────────
 gen_zip() {
-    log_group_start "Package  [$(ts)]"
+    log_group_start "🤐" "Package  [$(ts)]"
     local T0=$(date +%s)
     local SRC="$TC_DIR/NovaKernel/$DEVICE/$BUILD_TYPE"
     local ZIP_DIR="$TC_DIR/NovaKernel/$DEVICE/ZIP"
@@ -452,41 +549,14 @@ gen_zip() {
     log_group_end
 }
 
-# ── Interactive prompts ──────────────────────────────────────────
-prompt_variant() {
-    echo -e "${CYAN}${BOLD}"
-    echo "  Select target device:"
-    echo "  [1] Galaxy A73 5G  (a73xq)"
-    echo "  [2] Galaxy A52s 5G (a52sxq)"
-    echo "  [3] Galaxy M52 5G  (m52xq)"
-    echo -e "${RESET}"
-    read -rp "  → Choice [1-3]: " choice
-    case "$choice" in
-        1) VARIANT="a73xq";;
-        2) VARIANT="a52sxq";;
-        3) VARIANT="m52xq";;
-        *) log_err "Invalid choice"; exit 1;;
-    esac
-}
 
-prompt_ksu() {
-    echo -e "${CYAN}${BOLD}"
-    echo "  Build with KernelSU support?"
-    echo "  [1] No  — standard GKI kernel"
-    echo "  [2] Yes — KernelSU kernel"
-    echo -e "${RESET}"
-    read -rp "  → Choice [1-2]: " choice
-    case "$choice" in
-        1) KERNELSU=false;;
-        2) KERNELSU=true;;
-        *) log_err "Invalid choice"; exit 1;;
-    esac
-}
+# ─────────────────────────────────────────────────────────────────
+#  § 6 — ENTRY POINT
+# ─────────────────────────────────────────────────────────────────
 
-# ── Entry ────────────────────────────────────────────────────────
 ENTRY() {
     if [[ "${1:-}" == "clean" ]]; then
-        log_group_start "Clean"
+        log_group_start "🧹" "Clean"
         rm -rf "$OUT_DIR" "$TC_DIR/NovaKernel"
         log_ok "Cleaned out/ and NovaKernel artifacts"
         log_group_end
@@ -498,6 +568,7 @@ ENTRY() {
     check_dependencies
     init_vars
 
+    # ── Resolve variant ──────────────────────────────────────────
     if [[ -n "${1:-}" ]]; then
         VARIANT="$1"
     elif [[ -n "${NK_VARIANT:-}" ]]; then
@@ -511,6 +582,7 @@ ENTRY() {
         exit 1
     }
 
+    # ── Resolve KernelSU ─────────────────────────────────────────
     if [[ -n "${NK_KSU:-}" ]]; then
         KERNELSU="${NK_KSU}"
     else
@@ -519,39 +591,38 @@ ENTRY() {
 
     if [[ "$KERNELSU" == "true" ]]; then
         BUILD_TYPE="KSU"
-        KSU_SUFFIX="-ksu"
+        if [[ -n "${NK_KSU_BRANCH:-}" ]]; then
+            KSU_BRANCH="${NK_KSU_BRANCH}"
+        else
+            prompt_ksu_branch
+        fi
+        [[ -z "${KSU_BRANCH:-}" ]] && KSU_BRANCH="legacy"
     else
         BUILD_TYPE="GKI"
-        KSU_SUFFIX=""
     fi
-    export BUILD_TYPE KSU_SUFFIX
+    export BUILD_TYPE KSU_BRANCH
 
+    # ── Build plan ───────────────────────────────────────────────
     echo ""
     echo -e "${CYAN}${BOLD}  ╔══════════════════════════════════════════╗${RESET}"
     echo -e "${CYAN}${BOLD}  ║       🚀  NovaKernel  Build Plan         ║${RESET}"
     echo -e "${CYAN}${BOLD}  ╠══════════════════════════════════════════╣${RESET}"
     echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Device:")  ${YELLOW}${BOLD}${VARIANT}${RESET}"
     echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Type:")    ${YELLOW}${BOLD}${BUILD_TYPE}${RESET}"
+    if [[ "$KERNELSU" == "true" ]]; then
+        echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "KSU Branch:") ${YELLOW}${BOLD}${KSU_BRANCH}${RESET}"
+    fi
     echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Out:")     ${DIM}${OUT_DIR:-$(pwd)/out}${RESET}"
     echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Started:") ${DIM}$(date '+%Y-%m-%d %H:%M:%S')${RESET}"
     echo -e "${CYAN}${BOLD}  ╚══════════════════════════════════════════╝${RESET}"
     echo ""
 
+    # ── Run phases ───────────────────────────────────────────────
     fetch_tools
 
-    log_group_start "Source Preparation"
     if [[ "$KERNELSU" == "true" ]]; then
-        log_step "Setting up KernelSU-Next..."
-        rm -rf KernelSU drivers/kernelsu
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
-        rm -rf KernelSU
-        local KSU_REPO="${NK_KSU_REPO:-https://github.com/OmarAlsmehan/KernelSU-Next.git}"
-        git clone --depth=1 -b legacy "$KSU_REPO" KernelSU
-        log_ok "KernelSU-Next (legacy) integrated"
-    else
-        log_info "KernelSU: disabled — standard GKI build"
+        setup_kernelsu
     fi
-    log_group_end
 
     build_kernel "$VARIANT"
     build_modules
@@ -559,6 +630,7 @@ ENTRY() {
     gki_repack
     gen_zip
 
+    # ── Done ─────────────────────────────────────────────────────
     local TOTAL
     TOTAL=$(elapsed $BUILD_START)
 
@@ -577,3 +649,4 @@ ENTRY() {
 }
 
 ENTRY "${1:-}"
+
