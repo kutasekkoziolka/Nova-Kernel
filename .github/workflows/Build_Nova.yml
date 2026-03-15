@@ -8,8 +8,8 @@ on:
         required: true
         type: choice
         options:
-          - all
           - a73xq
+          - all
           - a52sxq
           - m52xq
 
