@@ -25,7 +25,7 @@ on:
         default: ""
 
       ksu_branch:
-        description: "KernelSU-Next branch"
+        description: "KernelSU branch"
         required: false
         type: choice
         default: "legacy"
