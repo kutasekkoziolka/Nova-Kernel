@@ -582,8 +582,10 @@ ENTRY() {
         rm -rf KernelSU
         local KSU_REPO="${NK_KSU_REPO:-https://github.com/OmarAlsmehan/KernelSU-Next.git}"
         local KSU_BRANCH_USE="${KSU_BRANCH:-legacy}"
-        git clone --depth=1 -b "$KSU_BRANCH_USE" "$KSU_REPO" KernelSU
-        log_ok "KernelSU-Next (${KSU_BRANCH_USE}) integrated"
+        git clone "$KSU_REPO" KernelSU
+        cd KernelSU && git switch "$KSU_BRANCH_USE" 
+        cd .. && echo "Cloning ksu done"
+        log_ok "KernelSU (${KSU_BRANCH_USE}) integrated"
     else
         log_info "KernelSU: disabled — standard GKI build"
     fi
