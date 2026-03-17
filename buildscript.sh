@@ -103,7 +103,7 @@ fetch_tools() {
         apk_url="$(curl -s ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
             "https://api.github.com/repos/topjohnwu/Magisk/releases" \
             | grep -oE 'https://[^"]+\.apk' | grep 'Magisk[-.]v' | head -n1)"
-        wget -q --show-progress "$apk_url" -O "$TC_DIR/magisk.apk"
+        wget --progress=bar:force:noscroll "$apk_url" -O "$TC_DIR/magisk.apk"
         unzip -p "$TC_DIR/magisk.apk" "lib/x86_64/libmagiskboot.so" > "$TC_DIR/magiskboot"
         chmod +x "$TC_DIR/magiskboot"
         log_ok "magiskboot ready"
@@ -206,7 +206,7 @@ android/abi_gki_aarch64_zebra
     [[ -d "$OUT_DIR" ]] && make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" clean 2>&1 | sed 's/^/       /'
 
     log_step "make defconfig + fragment..."
-    make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" "$DEFCONF" "$FRAG" 2>&1 | sed 's/^/       /'
+    make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" "$DEFCONF" a73xq.config 2>&1 | sed 's/^/       /'
 
     log_step "make kernel..."
     make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" 2>&1 | sed 's/^/       /'
