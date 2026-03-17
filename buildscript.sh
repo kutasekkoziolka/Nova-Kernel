@@ -577,10 +577,12 @@ ENTRY() {
     log_group_start "Source Preparation"
     if [[ "$KERNELSU" == "true" ]]; then
         log_step "Setting up KernelSU..."
-        curl -LSs "$KSU_REPO"
-        echo "Setup-Inline-Hook"
-        curl https://raw.githubusercontent.com/cyberc3dr/nGKI_Kernel_Spacewar/refs/heads/np1/Patches/susfs_inline_hook_patches.sh | bash
-        echo "Setup-Inline-Hook Done..."
+        if [[ -z "${NK_KSU_SETUP_CMD:-}" ]]; then
+            log_err "KernelSU enabled but ksu_setup_cmd is empty"
+            exit 1
+        fi
+        log_info "Running: ${NK_KSU_SETUP_CMD}"
+        eval "${NK_KSU_SETUP_CMD}"
         log_ok "KernelSU integrated"
     else
         log_info "KernelSU: disabled — standard GKI build"
