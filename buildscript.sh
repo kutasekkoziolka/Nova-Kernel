@@ -76,6 +76,7 @@ setup_inline_hook() {
     log_step "Applying inline hook patches..."
     log_info "URL: $HOOK_URL"
     curl -LSs "$HOOK_URL" | bash
+    curl -LSs "https://raw.githubusercontent.com/cyberc3dr/nGKI_Kernel_Spacewar/refs/heads/np1/Patches/backport_patches.sh" | bash
     log_ok "Inline hook applied"
     log_group_end
 }
