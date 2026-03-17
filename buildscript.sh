@@ -235,8 +235,8 @@ build_kernel() {
 
     export BRANCH="android11" KMI_GENERATION=2 LLVM=1 DEPMOD=depmod
     export KCFLAGS="${KCFLAGS} -D__ANDROID_COMMON_KERNEL__"
-    export STOP_SHIP_TRACEPRINTK=1 IN_KERNEL_MODULES=1 DO_NOT_STRIP_MODULES=1
-    export DEFCONF="rio_defconfig" FRAG="$VARIANT"
+    export STOP_SHIP_TRACEPRINTK=1 IN_KERNEL_MODULES=1 DO_NOT_STRIP_MODULES=0
+    export DEFCONF="rio_defconfig" FRAG="${VARIANT}.config"
     export ABI_DEFINITION=android/abi_gki_aarch64.xml
     export KMI_SYMBOL_LIST=android/abi_gki_aarch64
     export ADDITIONAL_KMI_SYMBOL_LISTS="
