@@ -497,28 +497,6 @@ prompt_ksu() {
     esac
 }
 
-prompt_ksu_branch() {
-    echo -e "${CYAN}${BOLD}"
-    echo "  Select KernelSU branch:"
-    echo "  [1] legacy       (stable, recommended)"
-    echo "  [2] main         (latest stable)"
-    echo "  [3] next         (bleeding edge)"
-    echo "  [4] susfs-main   (SuSFS + main)"
-    echo "  [5] susfs-next   (SuSFS + next)"
-    echo "  [6] custom       (enter manually)"
-    echo -e "${RESET}"
-    read -rp "  → Choice [1-6]: " choice
-    case "$choice" in
-        1) KSU_BRANCH="legacy";;
-        2) KSU_BRANCH="main";;
-        3) KSU_BRANCH="next";;
-        4) KSU_BRANCH="susfs-main";;
-        5) KSU_BRANCH="susfs-next";;
-        6) read -rp "  → Branch name: " KSU_BRANCH
-           [[ -z "$KSU_BRANCH" ]] && { log_err "Branch name cannot be empty"; exit 1; };;
-        *) log_err "Invalid choice"; exit 1;;
-    esac
-}
 
 
 ENTRY() {
@@ -557,17 +535,11 @@ ENTRY() {
     if [[ "$KERNELSU" == "true" ]]; then
         BUILD_TYPE="KSU"
         KSU_SUFFIX="-ksu"
-        if [[ -n "${NK_KSU_BRANCH:-}" ]]; then
-            KSU_BRANCH="${NK_KSU_BRANCH}"
-        else
-            prompt_ksu_branch
-        fi
-        [[ -z "${KSU_BRANCH:-}" ]] && KSU_BRANCH="legacy"
     else
         BUILD_TYPE="GKI"
         KSU_SUFFIX=""
     fi
-    export BUILD_TYPE KSU_SUFFIX KSU_BRANCH
+    export BUILD_TYPE KSU_SUFFIX
 
     echo ""
     echo -e "${CYAN}${BOLD}  ╔══════════════════════════════════════════╗${RESET}"
@@ -575,9 +547,6 @@ ENTRY() {
     echo -e "${CYAN}${BOLD}  ╠══════════════════════════════════════════╣${RESET}"
     echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Device:")  ${YELLOW}${BOLD}${VARIANT}${RESET}"
     echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Type:")    ${YELLOW}${BOLD}${BUILD_TYPE}${RESET}"
-    if [[ "$KERNELSU" == "true" ]]; then
-    echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "KSU Branch:") ${YELLOW}${BOLD}${KSU_BRANCH}${RESET}"
-    fi
     echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Out:")     ${DIM}${OUT_DIR:-$(pwd)/out}${RESET}"
     echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Started:") ${DIM}$(date '+%Y-%m-%d %H:%M:%S')${RESET}"
     echo -e "${CYAN}${BOLD}  ╚══════════════════════════════════════════╝${RESET}"
