@@ -69,6 +69,17 @@ init_vars() {
     export PATH="$TC_DIR:$CLANG_PREBUILT_BIN:$PATH"
 }
 
+# ── Inline Hook setup ────────────────────────────────────────────
+setup_inline_hook() {
+    log_group_start "Inline Hook Setup"
+    local HOOK_URL="https://raw.githubusercontent.com/cyberc3dr/nGKI_Kernel_Spacewar/refs/heads/np1/Patches/susfs_inline_hook_patches.sh"
+    log_step "Applying inline hook patches..."
+    log_info "URL: $HOOK_URL"
+    curl -LSs "$HOOK_URL" | bash
+    log_ok "Inline hook applied"
+    log_group_end
+}
+
 # ── Tool fetching ────────────────────────────────────────────────
 fetch_tools() {
     log_group_start "Toolchain & Assets"
@@ -584,6 +595,7 @@ ENTRY() {
         log_info "Running: ${NK_KSU_SETUP_CMD}"
         eval "${NK_KSU_SETUP_CMD}"
         log_ok "KernelSU integrated"
+        setup_inline_hook
     else
         log_info "KernelSU: disabled — standard GKI build"
     fi
