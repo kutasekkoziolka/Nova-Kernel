@@ -19,26 +19,8 @@ on:
         type: boolean
         default: false
 
-      ksu_repo:
-        description: "KernelSU-Next repo URL (optional)"
-        required: false
-        default: ""
-
-      ksu_branch:
-        description: "KernelSU-Next branch"
-        required: false
-        type: choice
-        default: "legacy"
-        options:
-          - legacy
-          - main
-          - next
-          - susfs-main
-          - susfs-next
-          - custom
-
-      ksu_branch_custom:
-        description: "Custom branch name (only if ksu_branch = custom)"
+      ksu_setup_cmd:
+        description: "KernelSU setup command (e.g: curl -LSs \"URL\" | bash -s v3.0.0)"
         required: false
         default: ""
 
@@ -145,14 +127,12 @@ jobs:
           echo "version=$CLANGVER" >> "$GITHUB_OUTPUT"
 
       # ───────── Restore clang cache ─────────
-      - name: 📂 Restore clang cache
+      - name: 📂 Clang cache
         id: clang-cache
         uses: actions/cache@v4
         with:
           path: ~/toolchains/${{ steps.clangver.outputs.version }}
           key: clang-${{ runner.os }}-${{ steps.clangver.outputs.version }}
-          restore-keys: |
-            clang-${{ runner.os }}-
 
       - name: 💡 Cache status
         run: |
@@ -166,20 +146,11 @@ jobs:
         env:
           NK_VARIANT:        ${{ matrix.device }}
           NK_KSU:            ${{ github.event.inputs.kernelsu }}
-          NK_KSU_REPO:       ${{ github.event.inputs.ksu_repo }}
-          NK_KSU_BRANCH:     ${{ github.event.inputs.ksu_branch == 'custom' && github.event.inputs.ksu_branch_custom || github.event.inputs.ksu_branch }}
+          NK_KSU_SETUP_CMD:  ${{ github.event.inputs.ksu_setup_cmd }}
           DEBUG:             ${{ github.event.inputs.debug }}
         run: |
           chmod +x buildscript.sh
           ./buildscript.sh
-
-      # ───────── Save clang cache ─────────
-      - name: 💾 Save clang cache
-        if: steps.clang-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/toolchains/${{ steps.clangver.outputs.version }}
-          key: clang-${{ runner.os }}-${{ steps.clangver.outputs.version }}
 
       - name: 🔍  Locate output ZIP
         id: find-zip
