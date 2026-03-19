@@ -56,7 +56,7 @@ ts()            { date '+%H:%M:%S'; }
 check_dependencies() {
     log_group_start "🔍" "Dependency Check"
     local missing=false
-    for tool in git curl wget jq unzip tar lz4 awk sed sha1sum md5sum zip; do
+    for tool in git curl wget unzip tar lz4 awk sed zip patch; do
         if command -v "$tool" &>/dev/null; then
             log_info "$(printf '%-14s' "$tool")✔  $(command -v "$tool")"
         else
@@ -118,22 +118,58 @@ prompt_ksu() {
 prompt_ksu_branch() {
     echo -e "${CYAN}${BOLD}"
     echo "  Select KernelSU branch:"
-    echo "  [1] legacy       (stable, recommended)"
-    echo "  [2] main         (latest stable)"
-    echo "  [3] next         (bleeding edge)"
-    echo "  [4] susfs-main   (SuSFS + main)"
-    echo "  [5] susfs-next   (SuSFS + next)"
-    echo "  [6] custom       (enter manually)"
+    echo "  [1] legacy          (stable, recommended)"
+    echo "  [2] main            (latest stable)"
+    echo "  [3] next            (bleeding edge)"
+    echo "  [4] susfs-main      (SuSFS + main)"
+    echo "  [5] susfs-next      (SuSFS + next)"
+    echo "  [6] legacy-susfs-v2 (SuSFS v2 + legacy)"
+    echo "  [7] custom          (enter manually)"
     echo -e "${RESET}"
-    read -rp "  → Choice [1-6]: " choice
+    read -rp "  → Choice [1-7]: " choice
     case "$choice" in
         1) KSU_BRANCH="legacy";;
         2) KSU_BRANCH="main";;
         3) KSU_BRANCH="next";;
         4) KSU_BRANCH="susfs-main";;
         5) KSU_BRANCH="susfs-next";;
-        6) read -rp "  → Branch name: " KSU_BRANCH
+        6) KSU_BRANCH="legacy-susfs-v2";;
+        7) read -rp "  → Branch name: " KSU_BRANCH
            [[ -z "$KSU_BRANCH" ]] && { log_err "Branch name cannot be empty"; exit 1; };;
+        *) log_err "Invalid choice"; exit 1;;
+    esac
+}
+
+prompt_hook_type() {
+    echo -e "${CYAN}${BOLD}"
+    echo "  Select KernelSU hook type:"
+    echo "  [1] kprobes      — kprobe-based (no kernel patches needed)"
+    echo "  [2] scope-min-1.6 — scope-min manual hook patch (5.4)"
+    echo "  [3] rksu         — rksu manual hook patch (4.19/5.4)"
+    echo "  [4] syscall      — syscall hook patches"
+    echo "  [5] inline       — inline / susfs hook patches"
+    echo -e "${RESET}"
+    read -rp "  → Choice [1-5]: " choice
+    case "$choice" in
+        1) HOOK_TYPE="kprobes";;
+        2) HOOK_TYPE="scope-min-1.6";;
+        3) HOOK_TYPE="rksu";;
+        4) HOOK_TYPE="syscall";;
+        5) HOOK_TYPE="inline";;
+        *) log_err "Invalid choice"; exit 1;;
+    esac
+}
+
+prompt_backport() {
+    echo -e "${CYAN}${BOLD}"
+    echo "  Apply backport patches?"
+    echo "  [1] No"
+    echo "  [2] Yes"
+    echo -e "${RESET}"
+    read -rp "  → Choice [1-2]: " choice
+    case "$choice" in
+        1) BACKPORT=false;;
+        2) BACKPORT=true;;
         *) log_err "Invalid choice"; exit 1;;
     esac
 }
@@ -169,6 +205,7 @@ fetch_tools() {
         wget -q --show-progress "$apk_url" -O "$TC_DIR/magisk.apk"
         unzip -p "$TC_DIR/magisk.apk" "lib/x86_64/libmagiskboot.so" > "$TC_DIR/magiskboot"
         chmod +x "$TC_DIR/magiskboot"
+        rm "$TC_DIR/magisk.apk"
         log_ok "magiskboot ready"
     else
         log_ok "magiskboot — cached ✓"
@@ -225,7 +262,108 @@ setup_kernelsu() {
     log_group_end
 }
 
-# ── 5.3  Kernel compile ──────────────────────────────────────────
+# ── 5.3  Hook patches ────────────────────────────────────────────
+apply_hook() {
+    if [[ "$HOOK_TYPE" == "kprobes" ]]; then
+        log_ok "Hook type: kprobes — handled by KernelSU, no patches needed"
+        return
+    fi
+
+    log_group_start "🪝" "Hook Patches  [$HOOK_TYPE]  [$(ts)]"
+    local T0=$(date +%s)
+
+    case "$HOOK_TYPE" in
+
+        scope-min-1.6)
+            local PATCH_URL="https://raw.githubusercontent.com/OmarAlsmehan/Random-stuff/refs/heads/main/scope-min-manual-hook.1.6-5.4.patch"
+            local PATCH_FILE="$TC_DIR/scope-min-1.6.patch"
+
+            if grep -q "ksu_handle_execveat" "$SRC_DIR/fs/exec.c" 2>/dev/null; then
+                log_warn "scope-min-1.6 hook already applied — skipping"
+            else
+                log_step "Downloading scope-min-1.6 patch..."
+                wget -q "$PATCH_URL" -O "$PATCH_FILE"
+                log_step "Applying patch..."
+                patch -p1 -d "$SRC_DIR" < "$PATCH_FILE"
+                log_ok "scope-min-1.6 hook applied"
+            fi
+            ;;
+
+        rksu)
+            local PATCH_URL="https://raw.githubusercontent.com/rksuorg/kernel_patches/refs/heads/master/manual_hook/kernel-4.19_5.4.patch"
+            local PATCH_FILE="$TC_DIR/rksu-manual-hook.patch"
+
+            if grep -q "ksu_handle_execveat" "$SRC_DIR/fs/exec.c" 2>/dev/null; then
+                log_warn "RKSU hook already applied — skipping"
+            else
+                log_step "Downloading RKSU hook patch..."
+                wget -q "$PATCH_URL" -O "$PATCH_FILE"
+                log_step "Applying patch..."
+                patch -p1 -d "$SRC_DIR" < "$PATCH_FILE"
+                log_ok "RKSU hook applied"
+            fi
+            ;;
+
+        syscall)
+            local SCRIPT_URL="https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/refs/heads/mainline/Patches/syscall_hook_patches.sh"
+            local SCRIPT_FILE="$TC_DIR/syscall_hook_patches.sh"
+
+            if grep -q "ksu_handle_execveat" "$SRC_DIR/fs/exec.c" 2>/dev/null; then
+                log_warn "Syscall hook already applied — skipping"
+            else
+                log_step "Downloading syscall hook script..."
+                wget -q "$SCRIPT_URL" -O "$SCRIPT_FILE"
+                chmod +x "$SCRIPT_FILE"
+                log_step "Running syscall hook patches..."
+                ( cd "$SRC_DIR" && bash "$SCRIPT_FILE" )
+                log_ok "Syscall hook applied"
+            fi
+            ;;
+
+        inline)
+            local SCRIPT_URL="https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/refs/heads/mainline/Patches/susfs_inline_hook_patches.sh"
+            local SCRIPT_FILE="$TC_DIR/susfs_inline_hook_patches.sh"
+
+            if grep -q "ksu_handle_execveat" "$SRC_DIR/fs/exec.c" 2>/dev/null; then
+                log_warn "Inline hook already applied — skipping"
+            else
+                log_step "Downloading inline hook script..."
+                wget -q "$SCRIPT_URL" -O "$SCRIPT_FILE"
+                chmod +x "$SCRIPT_FILE"
+                log_step "Running inline hook patches..."
+                ( cd "$SRC_DIR" && bash "$SCRIPT_FILE" )
+                log_ok "Inline hook applied"
+            fi
+            ;;
+    esac
+
+    log_ok "Hook patches done in $(elapsed $T0)"
+    log_group_end
+}
+
+# ── 5.4  Backport patches ────────────────────────────────────────
+apply_backport() {
+    log_group_start "⬆️" "Backport Patches  [$(ts)]"
+    local T0=$(date +%s)
+    local SCRIPT_URL="https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/refs/heads/mainline/Patches/backport_patches.sh"
+    local SCRIPT_FILE="$TC_DIR/backport_patches.sh"
+
+    if grep -q "path_umount" "$SRC_DIR/fs/namespace.c" 2>/dev/null; then
+        log_warn "Backport already applied — skipping"
+    else
+        log_step "Downloading backport script..."
+        wget -q "$SCRIPT_URL" -O "$SCRIPT_FILE"
+        chmod +x "$SCRIPT_FILE"
+        log_step "Running backport patches..."
+        ( cd "$SRC_DIR" && bash "$SCRIPT_FILE" )
+        log_ok "Backport patches applied"
+    fi
+
+    log_ok "Backport done in $(elapsed $T0)"
+    log_group_end
+}
+
+# ── 5.5  Kernel compile ──────────────────────────────────────────
 build_kernel() {
     log_group_start "🔨" "Kernel Compile  [$(ts)]"
     case "$1" in
@@ -239,7 +377,7 @@ build_kernel() {
     export BRANCH="android11" KMI_GENERATION=2 LLVM=1 DEPMOD=depmod
     export KCFLAGS="${KCFLAGS} -D__ANDROID_COMMON_KERNEL__"
     export STOP_SHIP_TRACEPRINTK=1 IN_KERNEL_MODULES=1
-    export DO_NOT_STRIP_MODULES=0 INSTALL_MOD_STRIP=1
+    export DO_NOT_STRIP_MODULES=1 INSTALL_MOD_STRIP=1
     export DEFCONF="nova_defconfig" FRAG="${VARIANT}.config"
     export ABI_DEFINITION=android/abi_gki_aarch64.xml
     export KMI_SYMBOL_LIST=android/abi_gki_aarch64
@@ -277,6 +415,7 @@ android/abi_gki_aarch64_zebra
     log_kv "Type:"      "$BUILD_TYPE"
     if [[ "$BUILD_TYPE" == "KSU" ]]; then
         log_kv "KSU Branch:" "${KSU_BRANCH:-legacy}"
+        log_kv "Hook:"       "${HOOK_TYPE:-gki}"
     fi
     log_kv "Version:"   "5.4.x$LOCALVERSION"
     log_kv "Toolchain:" "$(clang --version | head -n1)"
@@ -298,7 +437,7 @@ android/abi_gki_aarch64_zebra
     log_group_end
 }
 
-# ── 5.4  Modules ─────────────────────────────────────────────────
+# ── 5.6  Modules ─────────────────────────────────────────────────
 build_modules() {
     log_group_start "📦" "Modules  [$(ts)]"
     local T0=$(date +%s)
@@ -327,7 +466,7 @@ build_modules() {
     log_group_end
 }
 
-# ── 5.5  Artifact staging ─────────────────────────────────────────
+# ── 5.7  Artifact staging ─────────────────────────────────────────
 stage_artifacts() {
     log_group_start "🗂️" "Staging Artifacts"
     mkdir -p \
@@ -426,7 +565,7 @@ FLASH_EOF
     log_group_end
 }
 
-# ── 5.6  Image repack ─────────────────────────────────────────────
+# ── 5.8  Image repack ─────────────────────────────────────────────
 gki_repack() {
     log_group_start "🖼️" "Image Repack  [$(ts)]"
     local T0=$(date +%s)
@@ -508,7 +647,7 @@ gki_repack() {
     log_group_end
 }
 
-# ── 5.7  Package as ZIP ───────────────────────────────────────────
+# ── 5.9  Package as ZIP ───────────────────────────────────────────
 gen_zip() {
     log_group_start "🤐" "Package  [$(ts)]"
     local T0=$(date +%s)
@@ -563,6 +702,16 @@ ENTRY() {
         exit 0
     fi
 
+    # ── Phase selector ───────────────────────────────────────────
+    # --phase ksu   → only fetch_tools + KSU setup/hook/backport
+    # --phase build → only fetch_tools + compile/package
+    # (default)     → full build — both phases
+    PHASE="all"
+    if [[ "${1:-}" == "--phase" ]]; then
+        PHASE="${2:?'--phase requires: ksu | build | all'}"
+        shift 2
+    fi
+
     local BUILD_START=$(date +%s)
 
     check_dependencies
@@ -591,16 +740,43 @@ ENTRY() {
 
     if [[ "$KERNELSU" == "true" ]]; then
         BUILD_TYPE="KSU"
+
+        # KSU branch
         if [[ -n "${NK_KSU_BRANCH:-}" ]]; then
             KSU_BRANCH="${NK_KSU_BRANCH}"
         else
             prompt_ksu_branch
         fi
         [[ -z "${KSU_BRANCH:-}" ]] && KSU_BRANCH="legacy"
+
+        # Hook type
+        if [[ -n "${NK_HOOK_TYPE:-}" ]]; then
+            HOOK_TYPE="${NK_HOOK_TYPE}"
+        else
+            prompt_hook_type
+        fi
+        [[ -z "${HOOK_TYPE:-}" ]] && HOOK_TYPE="kprobes"
+
+        [[ ! "$HOOK_TYPE" =~ ^(kprobes|scope-min-1\.6|rksu|syscall|inline)$ ]] && {
+            log_err "Invalid hook type: $HOOK_TYPE  (valid: kprobes | scope-min-1.6 | rksu | syscall | inline)"
+            exit 1
+        }
+
+        # Backport
+        if [[ -n "${NK_BACKPORT:-}" ]]; then
+            BACKPORT="${NK_BACKPORT}"
+        else
+            prompt_backport
+        fi
+        [[ -z "${BACKPORT:-}" ]] && BACKPORT=false
+
     else
         BUILD_TYPE="GKI"
+        HOOK_TYPE="kprobes"
+        BACKPORT=false
     fi
-    export BUILD_TYPE KSU_BRANCH
+
+    export BUILD_TYPE KSU_BRANCH HOOK_TYPE BACKPORT
 
     # ── Build plan ───────────────────────────────────────────────
     echo ""
@@ -611,6 +787,8 @@ ENTRY() {
     echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Type:")    ${YELLOW}${BOLD}${BUILD_TYPE}${RESET}"
     if [[ "$KERNELSU" == "true" ]]; then
         echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "KSU Branch:") ${YELLOW}${BOLD}${KSU_BRANCH}${RESET}"
+        echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Hook:")       ${YELLOW}${BOLD}${HOOK_TYPE}${RESET}"
+        echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Backport:")   ${YELLOW}${BOLD}${BACKPORT}${RESET}"
     fi
     echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Out:")     ${DIM}${OUT_DIR:-$(pwd)/out}${RESET}"
     echo -e "${CYAN}${BOLD}  ║${RESET}  $(printf '%-12s' "Started:") ${DIM}$(date '+%Y-%m-%d %H:%M:%S')${RESET}"
@@ -620,15 +798,21 @@ ENTRY() {
     # ── Run phases ───────────────────────────────────────────────
     fetch_tools
 
-    if [[ "$KERNELSU" == "true" ]]; then
-        setup_kernelsu
+    if [[ "$PHASE" == "all" || "$PHASE" == "ksu" ]]; then
+        if [[ "$KERNELSU" == "true" ]]; then
+            setup_kernelsu
+            apply_hook
+            [[ "$BACKPORT" == "true" ]] && apply_backport
+        fi
     fi
 
-    build_kernel "$VARIANT"
-    build_modules
-    stage_artifacts
-    gki_repack
-    gen_zip
+    if [[ "$PHASE" == "all" || "$PHASE" == "build" ]]; then
+        build_kernel "$VARIANT"
+        build_modules
+        stage_artifacts
+        gki_repack
+        gen_zip
+    fi
 
     # ── Done ─────────────────────────────────────────────────────
     local TOTAL
@@ -640,13 +824,16 @@ ENTRY() {
     echo -e "${GREEN}${BOLD}  ╠══════════════════════════════════════════╣${RESET}"
     echo -e "${GREEN}${BOLD}  ║${RESET}  $(printf '%-12s' "Device:")    ${BOLD}${VARIANT}${RESET}"
     echo -e "${GREEN}${BOLD}  ║${RESET}  $(printf '%-12s' "Type:")      ${BOLD}${BUILD_TYPE}${RESET}"
+    if [[ "$KERNELSU" == "true" ]]; then
+        echo -e "${GREEN}${BOLD}  ║${RESET}  $(printf '%-12s' "Hook:")      ${BOLD}${HOOK_TYPE}${RESET}"
+        echo -e "${GREEN}${BOLD}  ║${RESET}  $(printf '%-12s' "Backport:")  ${BOLD}${BACKPORT}${RESET}"
+    fi
     echo -e "${GREEN}${BOLD}  ║${RESET}  $(printf '%-12s' "Duration:")  ${BOLD}${TOTAL}${RESET}"
     echo -e "${GREEN}${BOLD}  ╚══════════════════════════════════════════╝${RESET}"
     echo -e "${DIM}    @fraxer / @utkustnr — respect the authors' time${RESET}"
     echo ""
 
-    log_notice "✅ Build complete — $VARIANT [$BUILD_TYPE] in $TOTAL"
+    log_notice "✅ Build complete — $VARIANT [$BUILD_TYPE] hook=$HOOK_TYPE backport=$BACKPORT in $TOTAL"
 }
 
-ENTRY "${1:-}"
-
+ENTRY "$@"
