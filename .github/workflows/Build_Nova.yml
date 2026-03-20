@@ -47,7 +47,7 @@ on:
         description: "KernelSU hook type (ignored if kernelsu = false)"
         required: false
         type: choice
-        default: "kprobes"
+        default: "Disabled"
         options:
           - kprobes
           - scope-min-1.6
