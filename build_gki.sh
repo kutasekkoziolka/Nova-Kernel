@@ -60,7 +60,7 @@ fetch_tools() {
     if [[ ! -d "$TC_DIR/clang-r547379/bin" ]]; then
         echo -e "${YELLOW}-> Toolchain not found, downloading...${NC}"
         mkdir -p "$TC_DIR/clang-r547379"
-        aria2c -x16 -s16 -k1M "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r547379.tar.gz" \
+        aria2c -x16 -s16 -k1M "https://github.com/OmarAlsmehan/Android-tools/releases/download/clang-r563880c-1/clang-r563880c.tar.gz" \
                -d "$TC_DIR" -o "clang.tar.gz"
         tar xf "$TC_DIR/clang.tar.gz" -C "$TC_DIR/clang-r547379"
         rm "$TC_DIR/clang.tar.gz"
