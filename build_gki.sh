@@ -130,7 +130,10 @@ gen_anykernel() {
 # --- 🚀 Main Control Logic ---
 setup_ksu() {
     cd "$SRC_DIR"
+    echo "Setup KernelSU"
     curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+    echo "Setup some backports"
+    curl "https://raw.githubusercontent.com/cyberc3dr/nGKI_Kernel_Spacewar/refs/heads/np1/Patches/backport_patches.sh" | bash
 }
 
 case "$1" in
