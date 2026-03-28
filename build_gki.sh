@@ -132,6 +132,11 @@ setup_ksu() {
     cd "$SRC_DIR"
     echo "Setup KernelSU"
     curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+    rm -rf KernelSU-Next
+    git clone https://github.com/maxsteeel/KernelSU-Next.git
+    cd KernelSU-Next
+    git switch legacy-dev
+    cd ..
     echo "Setup some backports"
     curl "https://raw.githubusercontent.com/cyberc3dr/nGKI_Kernel_Spacewar/refs/heads/np1/Patches/backport_patches.sh" | bash
 }
